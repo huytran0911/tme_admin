@@ -132,10 +132,10 @@ export const navSections: NavSection[] = [
     label: "Nội dung sản phẩm",
     items: [
       { label: "Quản Lý Sản Phẩm", href: "/catalog/products", icon: icons.cube },
-      { label: "Quản Lý Thông tin Sản Phẩm", href: "/products/info", icon: icons.file },
+      // { label: "Quản Lý Thông tin Sản Phẩm", href: "/products/info", icon: icons.file },
       { label: "Sản Phẩm Mới", href: "/products/new", icon: icons.sparkles },
-      { label: "Cập nhật Nhanh giá SP", href: "/products/quick-price", icon: icons.tag },
-      { label: "Cập nhật nhanh SL SP", href: "/products/quick-stock", icon: icons.chart },
+      // { label: "Cập nhật Nhanh giá SP", href: "/products/quick-price", icon: icons.tag },
+      // { label: "Cập nhật nhanh SL SP", href: "/products/quick-stock", icon: icons.chart },
       { label: "Phân loại Sản Phẩm", href: "/catalog/product-types", icon: icons.tag },
     ],
   },

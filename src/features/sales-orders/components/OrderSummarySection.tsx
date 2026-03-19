@@ -1,6 +1,7 @@
 "use client";
 
-import type { CartItem } from "../types";
+import type { CartItem, CartGiftResponse } from "../types";
+import { getMediaUrl } from "@/lib/media";
 
 type OrderSummarySectionProps = {
   cartItems: CartItem[];
@@ -8,7 +9,12 @@ type OrderSummarySectionProps = {
   onNoteChange: (note: string) => void;
   shippingFee?: number;
   onShippingFeeChange?: (fee: number) => void;
-  discount?: number;
+  subtotal: number;
+  saleOffDiscount: number;
+  promotionDiscount: number;
+  grandTotal: number;
+  gifts?: CartGiftResponse[];
+  giftValue?: number;
 };
 
 function formatCurrency(value: number): string {
@@ -21,10 +27,13 @@ export function OrderSummarySection({
   onNoteChange,
   shippingFee = 0,
   onShippingFeeChange,
-  discount = 0,
+  subtotal,
+  saleOffDiscount,
+  promotionDiscount,
+  grandTotal,
+  gifts = [],
+  giftValue = 0,
 }: OrderSummarySectionProps) {
-  const subtotal = cartItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const total = subtotal + shippingFee - discount;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -41,6 +50,46 @@ export function OrderSummarySection({
           className="w-full resize-none rounded border border-slate-300 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none"
         />
       </div>
+
+      {/* Gifts section */}
+      {gifts.length > 0 && (
+        <div className="border-b border-slate-200 p-4">
+          <h4 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-pink-600">
+            🎁 Quà tặng kèm
+            <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-xs font-semibold text-pink-700">
+              {gifts.length}
+            </span>
+          </h4>
+          <div className="space-y-2">
+            {gifts.map((gift, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-2 rounded bg-pink-50 px-3 py-2 text-xs"
+              >
+                {gift.giftProductImage && (
+                  <img
+                    src={getMediaUrl(gift.giftProductImage)}
+                    alt={gift.giftProductName}
+                    className="h-8 w-8 rounded border border-pink-200 object-cover"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="truncate font-medium text-slate-700">
+                    {gift.giftProductName}
+                  </p>
+                  <p className="text-slate-500">
+                    x{gift.giftQuantity} · Miễn phí
+                    {gift.giftPrice ? ` (trị giá ${formatCurrency(gift.giftPrice)}đ)` : ""}
+                  </p>
+                  <p className="text-slate-400">
+                    Khi mua: {gift.forProductName}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       <div className="p-4">
@@ -73,9 +122,23 @@ export function OrderSummarySection({
               </td>
             </tr>
             <tr>
-              <td className="py-1.5 text-slate-600">Khuyến mãi:</td>
+              <td className="py-1.5 text-slate-600">Giảm giá sản phẩm (Sale Off):</td>
               <td className="py-1.5 text-right text-rose-600">
-                {discount > 0 ? `-${formatCurrency(discount)}` : "0"}
+                {saleOffDiscount > 0 ? `-${formatCurrency(saleOffDiscount)}` : "0"}
+              </td>
+            </tr>
+            {giftValue > 0 && (
+              <tr>
+                <td className="py-1.5 text-slate-600">Quà tặng:</td>
+                <td className="py-1.5 text-right text-pink-600">
+                  -{formatCurrency(giftValue)}
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td className="py-1.5 text-slate-600">Khuyến mãi (Promotion):</td>
+              <td className="py-1.5 text-right text-rose-600">
+                {promotionDiscount > 0 ? `-${formatCurrency(promotionDiscount)}` : "0"}
               </td>
             </tr>
             <tr className="border-t border-slate-200">
@@ -83,7 +146,7 @@ export function OrderSummarySection({
                 Tổng thanh toán:
               </td>
               <td className="py-2 text-right text-lg font-bold text-emerald-600">
-                {formatCurrency(total)}
+                {formatCurrency(grandTotal)}
               </td>
             </tr>
           </tbody>

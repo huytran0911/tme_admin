@@ -14,6 +14,7 @@ import type {
   ProductVariant,
   PriceTier,
   InventoryAdjustmentRequest,
+  ComboItem,
 } from "./types";
 
 export async function fetchProducts(
@@ -388,4 +389,29 @@ export async function fetchViewData(viewName: string): Promise<ViewDataItem[]> {
     });
   }
   return [];
+}
+
+// ============= COMBO ITEMS =============
+
+// Fetch combo items (component variants) for a combo product
+export async function fetchComboItems(productId: number): Promise<ComboItem[]> {
+  try {
+    const { data } = await api.get(`/admin/v1/products/${productId}/combo-items`);
+    const result = (data as any)?.data ?? data;
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    console.error("fetchComboItems error:", error);
+    return [];
+  }
+}
+
+// Set combo items for a combo product (replace all)
+export type ComboItemInput = {
+  productVariantId: number;
+  quantity: number;
+  sortOrder: number;
+};
+
+export async function setComboItems(productId: number, items: ComboItemInput[]): Promise<void> {
+  await api.put(`/admin/v1/products/${productId}/combo-items`, { items });
 }

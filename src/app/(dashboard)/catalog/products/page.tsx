@@ -733,6 +733,7 @@ function ProductsPageContent() {
                 {/* <HeaderCell label="Danh mục" /> */}
                 <HeaderCell label="Ẩn" className="text-center" />
                 <HeaderCell label="SP Mới" className="text-center" />
+                <HeaderCell label="Loại" className="text-center" />
                 {/* <HeaderCell label="Giá min" className="text-right" /> */}
                 {/* <HeaderCell label="Giá max" className="text-right" /> */}
                 {/* <HeaderCell label="Biến thể" className="text-center" /> */}
@@ -745,7 +746,7 @@ function ProductsPageContent() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-5 text-center text-sm text-slate-500"
                   >
                     Đang tải sản phẩm...
@@ -863,6 +864,15 @@ function ProductsPageContent() {
                             className="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
                           />
                         </label>
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        {(item as any).isCombo ? (
+                          <span className="inline-flex items-center rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-600/20">
+                            COMBO
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </td>
                       {/* <td className="px-2 py-1.5 text-right">
                         <span className="text-sm text-slate-600">

@@ -15,13 +15,36 @@ import { formatDate } from "@/lib/utils";
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
     [ORDER_STATUS.NEW]: { label: "Mới", color: "bg-blue-50 text-blue-700 ring-blue-600/20" },
     [ORDER_STATUS.CONFIRMED]: { label: "Đã xác nhận", color: "bg-amber-50 text-amber-700 ring-amber-600/20" },
+    [ORDER_STATUS.PROCESSING]: { label: "Đang đóng gói", color: "bg-cyan-50 text-cyan-700 ring-cyan-600/20" },
     [ORDER_STATUS.SHIPPED]: { label: "Đang giao", color: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+    [ORDER_STATUS.DELIVERED]: { label: "Đã nhận hàng", color: "bg-teal-50 text-teal-700 ring-teal-600/20" },
     [ORDER_STATUS.COMPLETED]: { label: "Hoàn thành", color: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
     [ORDER_STATUS.CANCELLED]: { label: "Đã hủy", color: "bg-red-50 text-red-700 ring-red-600/20" },
 };
 
+const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+    UNPAID: { label: "Chưa TT", color: "bg-red-50 text-red-700 ring-red-600/20" },
+    PARTIAL: { label: "TT 1 phần", color: "bg-amber-50 text-amber-700 ring-amber-600/20" },
+    PAID: { label: "Đã TT", color: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+    POS: "Tại quầy",
+    ONLINE: "Online",
+    PHONE: "ĐT",
+};
+
 function StatusBadge({ status }: { status: string }) {
     const cfg = STATUS_CONFIG[status] ?? { label: status, color: "bg-slate-50 text-slate-600 ring-slate-500/20" };
+    return (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cfg.color}`}>
+            {cfg.label}
+        </span>
+    );
+}
+
+function PaymentBadge({ status }: { status: string }) {
+    const cfg = PAYMENT_STATUS_CONFIG[status] ?? { label: status, color: "bg-slate-50 text-slate-600 ring-slate-500/20" };
     return (
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cfg.color}`}>
             {cfg.label}
@@ -224,8 +247,10 @@ export default function SalesOrdersPage() {
                                 <HeaderCell label="Mã đơn" />
                                 <HeaderCell label="Khách hàng" />
                                 <HeaderCell label="Số ĐT" />
+                                <HeaderCell label="Kênh" className="text-center" />
                                 <HeaderCell label="Tổng tiền" className="text-right" />
-                                <HeaderCell label="Trạng thái" className="text-center" />
+                                <HeaderCell label="Đơn hàng" className="text-center" />
+                                <HeaderCell label="Thanh toán" className="text-center" />
                                 <HeaderCell label="Ngày tạo" />
                                 <HeaderCell label="Chức năng" className="text-right" />
                             </tr>
@@ -233,13 +258,13 @@ export default function SalesOrdersPage() {
                         <tbody className="divide-y divide-slate-100 bg-white">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={7} className="px-4 py-5 text-center text-sm text-slate-500">
+                                    <td colSpan={9} className="px-4 py-5 text-center text-sm text-slate-500">
                                         Đang tải danh sách đơn hàng...
                                     </td>
                                 </tr>
                             ) : orders.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-500">
+                                    <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-500">
                                         Chưa có đơn hàng nào.
                                     </td>
                                 </tr>
@@ -259,11 +284,19 @@ export default function SalesOrdersPage() {
                                         <td className="px-3 py-2 text-sm text-slate-600">
                                             {order.customerPhone || "-"}
                                         </td>
+                                        <td className="px-3 py-2 text-center">
+                                            <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                                                {CHANNEL_LABELS[order.channel] ?? order.channel ?? "-"}
+                                            </span>
+                                        </td>
                                         <td className="px-3 py-2 text-sm font-semibold text-slate-900 text-right">
-                                            {formatCurrency(order.totalAmount)}
+                                            {formatCurrency(order.finalAmount || order.totalAmount)}
                                         </td>
                                         <td className="px-3 py-2 text-center">
                                             <StatusBadge status={order.status} />
+                                        </td>
+                                        <td className="px-3 py-2 text-center">
+                                            <PaymentBadge status={order.paymentStatus} />
                                         </td>
                                         <td className="px-3 py-2 text-sm text-slate-600">
                                             {formatDate(order.createdAt, "dd/MM/yyyy")}

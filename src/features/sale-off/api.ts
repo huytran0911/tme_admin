@@ -11,6 +11,7 @@ import type {
   UpdateSaleOffProductRequest,
   PagedResult,
   ProductForSelection,
+  VariantForSelection,
 } from "./types";
 
 // Base endpoint - note the plural "sale-offs"
@@ -57,7 +58,7 @@ export async function deleteSaleOff(id: number): Promise<void> {
   await api.delete(`${API_BASE}/${id}`);
 }
 
-// ============ Sale Off Products ============
+// ============ Sale Off Products (variant-based) ============
 
 export async function fetchSaleOffProducts(
   saleOffId: number,
@@ -90,17 +91,17 @@ export async function addProductsToSaleOff(
 
 export async function updateSaleOffProduct(
   saleOffId: number,
-  productId: number,
+  variantId: number,
   request: UpdateSaleOffProductRequest
 ): Promise<void> {
-  await api.put(`${API_BASE}/${saleOffId}/products/${productId}`, request);
+  await api.put(`${API_BASE}/${saleOffId}/products/${variantId}`, request);
 }
 
-export async function removeProductFromSaleOff(saleOffId: number, productId: number): Promise<void> {
-  await api.delete(`${API_BASE}/${saleOffId}/products/${productId}`);
+export async function removeProductFromSaleOff(saleOffId: number, variantId: number): Promise<void> {
+  await api.delete(`${API_BASE}/${saleOffId}/products/${variantId}`);
 }
 
-// ============ Products for selection ============
+// ============ Products & Variants for selection ============
 
 export async function fetchProductsForSelection(params: {
   categoryId?: number;
@@ -131,4 +132,10 @@ export async function fetchProductsForSelection(params: {
     page: payload?.page ?? params.page ?? 1,
     pageSize: payload?.pageSize ?? params.pageSize ?? items.length,
   };
+}
+
+export async function fetchVariantsForProduct(productId: number): Promise<VariantForSelection[]> {
+  const { data } = await api.get(`/admin/v1/products/${productId}/variants`);
+  const payload = (data as any)?.data ?? data;
+  return Array.isArray(payload) ? payload : [];
 }

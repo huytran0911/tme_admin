@@ -21,6 +21,7 @@ type VariantMatrixTableProps = {
   onOpenTierPricing?: (variant: ProductVariant | VariantDraft) => void;
   onDeleteVariant?: (variantId: number) => Promise<void>;
   disabled?: boolean;
+  hideDelete?: boolean;
 };
 
 export function VariantMatrixTable({
@@ -32,6 +33,7 @@ export function VariantMatrixTable({
   onOpenTierPricing,
   onDeleteVariant,
   disabled = false,
+  hideDelete = false,
 }: VariantMatrixTableProps) {
   const [localDrafts, setLocalDrafts] = useState<VariantDraft[]>(drafts);
   const [localVariants, setLocalVariants] = useState<ProductVariant[]>(variants);
@@ -306,9 +308,11 @@ export function VariantMatrixTable({
               <th className="px-2 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-[80px]">
                 Giá sỉ
               </th>
-              <th className="px-2 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-[60px]">
-                Thao tác
-              </th>
+              {!hideDelete && (
+                <th className="px-2 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-[60px]">
+                  Thao tác
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -387,39 +391,47 @@ export function VariantMatrixTable({
                         Set giá
                       </button>
                     </td>
-                    <td className="px-2 py-2">
-                      <button
-                        onClick={() => {
-                          const updated = localDrafts.filter((_, i) => i !== index);
-                          setLocalDrafts(updated);
-                        }}
-                        disabled={disabled}
-                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
-                        title="Xóa"
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-                    </td>
+                    {!hideDelete && (
+                      <td className="px-2 py-2">
+                        <button
+                          onClick={() => {
+                            const updated = localDrafts.filter((_, i) => i !== index);
+                            setLocalDrafts(updated);
+                          }}
+                          disabled={disabled}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                          title="Xóa"
+                        >
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               : localVariants.map((variant) => (
                   <tr key={variant.id} className="hover:bg-slate-50 transition">
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-1">
-                        {variant.options.map((opt, optIdx) => (
-                          <span
-                            key={optIdx}
-                            className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium"
-                          >
-                            {opt.type_name}: {opt.value}
+                        {variant.options && variant.options.length > 0 ? (
+                          variant.options.map((opt, optIdx) => (
+                            <span
+                              key={optIdx}
+                              className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium"
+                            >
+                              {opt.type_name}: {opt.value}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-xs font-medium">
+                            Mặc định
                           </span>
-                        ))}
+                        )}
                       </div>
                     </td>
                     <td className="px-2 py-2">
@@ -486,22 +498,24 @@ export function VariantMatrixTable({
                         Set giá
                       </button>
                     </td>
-                    <td className="px-2 py-2">
-                      <button
-                        onClick={() => onDeleteVariant?.(variant.id)}
-                        disabled={disabled}
-                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
-                        title="Xóa"
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-                    </td>
+                    {!hideDelete && (
+                      <td className="px-2 py-2">
+                        <button
+                          onClick={() => onDeleteVariant?.(variant.id)}
+                          disabled={disabled}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                          title="Xóa"
+                        >
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
           </tbody>

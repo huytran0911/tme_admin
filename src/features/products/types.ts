@@ -16,6 +16,7 @@ export type Product = {
   totalVariants: number;
   totalStock: number;
   isNewProduct?: boolean;
+  isCombo?: boolean;
   createdAt: string;
 };
 
@@ -64,6 +65,7 @@ export type UpdateProductRequest = {
   packed?: string | null;
   type?: string | null;
   isNewProduct?: boolean;
+  isCombo?: boolean;
   pointSave?: number;
 };
 
@@ -187,6 +189,7 @@ export type ProductDetail = {
   status: number;
   sort: number;
   isNewProduct: boolean;
+  isCombo: boolean;
   pointSave: number;
   unit: string | null;
   unitEn: string | null;
@@ -222,4 +225,16 @@ export type ProductDetail = {
   noPage: number | null;
   priceCover: number | null;
   createdAt?: string;
+};
+
+// Combo Item (component variant inside a combo product)
+export type ComboItem = {
+  id: number;
+  productVariantId: number;
+  sku: string | null;
+  productName: string | null;
+  productImage: string | null;
+  quantity: number;
+  sortOrder: number;
+  stock?: number;
 };

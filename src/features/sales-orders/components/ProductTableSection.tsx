@@ -100,6 +100,7 @@ export function ProductTableSection({ cartItems, onCartChange }: ProductTableSec
           quantity: 1,
           unitPrice: product.minPrice || 0,
           lineTotal: product.minPrice || 0,
+          saleOffDiscount: 0,
         };
         onCartChange([...cartItems, newItem]);
         resetSearch();
@@ -148,7 +149,8 @@ export function ProductTableSection({ cartItems, onCartChange }: ProductTableSec
           })) || [],
         quantity: qty,
         unitPrice,
-        lineTotal: unitPrice * qty,
+        lineTotal: unitPrice * qty, // Live updated by preview API anyway
+        saleOffDiscount: 0, 
         stock,
         priceTiers: tiers,
       };
@@ -402,7 +404,18 @@ export function ProductTableSection({ cartItems, onCartChange }: ProductTableSec
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <span className="text-slate-700">{formatCurrency(item.unitPrice)}đ</span>
+                      {item.saleOffDiscount > 0 ? (
+                        <div className="flex flex-col items-end">
+                          <span className="text-slate-400 line-through text-xs">
+                            {formatCurrency(item.unitPrice)}đ
+                          </span>
+                          <span className="text-rose-600 font-medium">
+                            {formatCurrency(item.unitPrice - item.saleOffDiscount)}đ
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-700">{formatCurrency(item.unitPrice)}đ</span>
+                      )}
                       {item.priceTiers && item.priceTiers.length > 1 && (
                         <div className="mt-1 group relative">
                           <span className="cursor-help text-[10px] text-blue-500 underline decoration-dotted">

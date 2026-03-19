@@ -30,16 +30,20 @@ import {
   updateProductGift,
   deleteProductGift,
   fetchProducts,
+  fetchComboItems,
+  setComboItems,
   type ViewDataItem,
   type CrossSellProduct,
   type CrossSellProductInput,
   type ProductGift,
   type ProductGiftInput,
+  type ComboItemInput,
 } from "@/features/products/api";
 import { ProductPicker } from "@/features/products/components";
 import { fetchSuppliers } from "@/features/suppliers/api";
 import type { Supplier } from "@/features/suppliers/types";
 import type {
+  Product,
   ProductDetail,
   Group,
   Category,
@@ -48,6 +52,7 @@ import type {
   ProductTypeValue,
   ProductVariant,
   PriceTier,
+  ComboItem,
 } from "@/features/products/types";
 import { buildImageUrl } from "@/lib/utils";
 import { ProductSalesTab } from "@/features/product-variants";
@@ -62,15 +67,17 @@ type TabKey =
   | "related"
   | "similar"
   | "bundle"
-  | "cross-sell";
+  | "cross-sell"
+  | "combo-items";
 
-const tabs: { key: TabKey; label: string }[] = [
+const allTabs: { key: TabKey; label: string }[] = [
   { key: "basic-info", label: "Thông tin" },
   { key: "description", label: "Mô tả" },
   { key: "notes", label: "Ghi chú" },
   { key: "variants-pricing", label: "Thông tin bán hàng" },
   // { key: "inventory", label: "Kho hàng" }, // Tạm thời ẩn
   { key: "shipping", label: "Vận chuyển" },
+  { key: "combo-items", label: "Thành phần Combo" },
   { key: "related", label: "SP liên quan" },
   { key: "similar", label: "SP cùng chức năng" },
   { key: "bundle", label: "SP tặng kèm" },
@@ -894,6 +901,19 @@ export default function ProductEditPage() {
   const [loadingGiftVariants, setLoadingGiftVariants] = useState(false);
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
 
+  // Combo items state (Thành phần Combo)
+  const [comboItems, setComboItemsState] = useState<ComboItem[]>([]);
+  const [loadingCombo, setLoadingCombo] = useState(false);
+  const [savingCombo, setSavingCombo] = useState(false);
+  const [comboSearchKeyword, setComboSearchKeyword] = useState("");
+  const [comboSearchResults, setComboSearchResults] = useState<Product[]>([]);
+  const [comboSearchLoading, setComboSearchLoading] = useState(false);
+  const [showComboSearch, setShowComboSearch] = useState(false);
+  const [comboSelectedProduct, setComboSelectedProduct] = useState<Product | null>(null);
+  const [comboVariants, setComboVariants] = useState<ProductVariant[]>([]);
+  const [comboLoadingVariants, setComboLoadingVariants] = useState(false);
+  const comboSearchRef = useRef<HTMLDivElement>(null);
+
   // Load groups + categories + suppliers + view data for dropdowns
   const loadDropdownData = async () => {
     try {
@@ -1125,6 +1145,163 @@ export default function ProductEditPage() {
       notify({ message: "Lưu danh sách SP bán kèm thất bại.", variant: "error" });
     } finally {
       setSavingCrossSell(false);
+    }
+  };
+
+  // ============= COMBO ITEMS LOGIC =============
+
+  // Load combo items
+  const loadComboItems = async () => {
+    setLoadingCombo(true);
+    try {
+      const data = await fetchComboItems(productId);
+      setComboItemsState(data);
+    } catch (error) {
+      console.error("Load combo items error:", error);
+      notify({ message: "Không tải được thành phần combo.", variant: "error" });
+    } finally {
+      setLoadingCombo(false);
+    }
+  };
+
+  // Load combo items when switching to combo-items tab
+  useEffect(() => {
+    if (activeTab === "combo-items" && product?.isCombo) {
+      loadComboItems();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Search products for combo (step 1)
+  const handleComboSearch = async (keyword: string) => {
+    setComboSearchKeyword(keyword);
+    setComboSelectedProduct(null);
+    setComboVariants([]);
+    if (!keyword.trim() || keyword.trim().length < 2) {
+      setComboSearchResults([]);
+      setShowComboSearch(false);
+      return;
+    }
+    setComboSearchLoading(true);
+    setShowComboSearch(true);
+    try {
+      const res = await fetchProducts({ search: keyword.trim(), page: 1, pageSize: 10 });
+      setComboSearchResults(res.items || []);
+    } catch (error) {
+      console.error("Search products for combo error:", error);
+      setComboSearchResults([]);
+    } finally {
+      setComboSearchLoading(false);
+    }
+  };
+
+  // Select product and load variants (step 2)
+  const handleComboSelectProduct = async (selectedProd: Product) => {
+    setComboSelectedProduct(selectedProd);
+    setComboSearchKeyword(selectedProd.name || "");
+    setShowComboSearch(false);
+    setComboLoadingVariants(true);
+    try {
+      const prodVariants = await fetchProductVariants(selectedProd.id);
+      setComboVariants(prodVariants);
+      // If only 1 variant, add directly
+      if (prodVariants.length === 1) {
+        handleAddComboVariant(selectedProd, prodVariants[0]);
+      }
+    } catch (error) {
+      console.error("Load combo variants error:", error);
+      setComboVariants([]);
+    } finally {
+      setComboLoadingVariants(false);
+    }
+  };
+
+  // Add variant to combo (step 3)
+  const handleAddComboVariant = (prod: Product, variant: ProductVariant) => {
+    if (comboItems.some((item) => item.productVariantId === variant.id)) {
+      notify({ message: "Variant này đã có trong combo.", variant: "error" });
+      return;
+    }
+    const newItem: ComboItem = {
+      id: 0,
+      productVariantId: variant.id,
+      sku: variant.sku,
+      productName: prod.name,
+      productImage: prod.image,
+      quantity: 1,
+      sortOrder: comboItems.length,
+      stock: variant.stock,
+    };
+    setComboItemsState((prev) => [...prev, newItem]);
+    resetComboSearch();
+  };
+
+  // Reset combo search
+  const resetComboSearch = () => {
+    setComboSearchKeyword("");
+    setComboSearchResults([]);
+    setComboSelectedProduct(null);
+    setComboVariants([]);
+    setShowComboSearch(false);
+  };
+
+  // Close combo search dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        (showComboSearch || comboSelectedProduct) &&
+        comboSearchRef.current &&
+        !comboSearchRef.current.contains(event.target as Node)
+      ) {
+        setShowComboSearch(false);
+        setComboSelectedProduct(null);
+        setComboVariants([]);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [showComboSearch, comboSelectedProduct]);
+
+  // Remove variant from combo
+  const handleRemoveComboItem = (variantId: number) => {
+    setComboItemsState((prev) => prev.filter((item) => item.productVariantId !== variantId));
+  };
+
+  // Update combo item quantity
+  const handleComboItemQtyChange = (variantId: number, qty: number) => {
+    if (qty < 1) qty = 1;
+    setComboItemsState((prev) =>
+      prev.map((item) => (item.productVariantId === variantId ? { ...item, quantity: qty } : item))
+    );
+  };
+
+  // Compute estimated combo stock
+  const estimatedComboStock = useMemo(() => {
+    if (comboItems.length === 0) return 0;
+    const stocks = comboItems
+      .filter((item) => item.stock !== undefined && item.stock !== null)
+      .map((item) => Math.floor((item.stock || 0) / item.quantity));
+    if (stocks.length === 0) return null;
+    return Math.min(...stocks);
+  }, [comboItems]);
+
+  // Save combo items
+  const handleSaveComboItems = async () => {
+    setSavingCombo(true);
+    try {
+      const items: ComboItemInput[] = comboItems.map((item, index) => ({
+        productVariantId: item.productVariantId,
+        quantity: item.quantity,
+        sortOrder: index,
+      }));
+      await setComboItems(productId, items);
+      notify({ message: "Đã lưu thành phần combo!", variant: "success" });
+      await loadComboItems();
+    } catch (error) {
+      console.error("Save combo items error:", error);
+      notify({ message: "Lưu thành phần combo thất bại.", variant: "error" });
+    } finally {
+      setSavingCombo(false);
     }
   };
 
@@ -1408,8 +1585,13 @@ export default function ProductEditPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
             Quản Lý / Cập nhật
           </p>
-          <h1 className="text-xl font-semibold text-slate-900">
+          <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
             Cập nhật sản phẩm
+            {product?.isCombo && (
+              <span className="inline-flex items-center rounded bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-600/20">
+                COMBO
+              </span>
+            )}
           </h1>
         </div>
         <Breadcrumbs
@@ -1425,7 +1607,16 @@ export default function ProductEditPage() {
       {/* Tabs */}
       <div className="overflow-x-auto">
         <div className="flex border-b border-slate-200">
-          {tabs.map((tab) => (
+          {allTabs
+            .filter((tab) => {
+              // Combo products: show combo-items, hide bundle & cross-sell
+              if (product?.isCombo) {
+                return tab.key !== "bundle" && tab.key !== "cross-sell";
+              }
+              // Non-combo products: hide combo-items
+              return tab.key !== "combo-items";
+            })
+            .map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -1942,7 +2133,7 @@ export default function ProductEditPage() {
 
             {/* Tab 4: Thông tin bán hàng (Variants + Giá) */}
             {activeTab === "variants-pricing" && (
-              <ProductSalesTab productId={productId} />
+              <ProductSalesTab productId={productId} isCombo={product?.isCombo} />
             )}
 
             {/* Tab 5: Kho hàng (Inventory) */}
@@ -2594,6 +2785,256 @@ export default function ProductEditPage() {
                         </table>
                       </div>
                     )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Thành phần Combo */}
+            {activeTab === "combo-items" && (
+              <div className="space-y-6">
+                {loadingCombo ? (
+                  <div className="text-center py-12 text-slate-500">
+                    <svg
+                      className="animate-spin h-8 w-8 mx-auto mb-3 text-violet-600"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Đang tải thành phần combo...
+                  </div>
+                ) : (
+                  <>
+                    {/* Description */}
+                    <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg flex items-start gap-2">
+                      <svg className="w-5 h-5 text-violet-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                      <div className="text-sm text-violet-700">
+                        Quản lý các sản phẩm (variant) nằm trong combo này. Mỗi variant sẽ được trừ tồn kho khi combo được bán.
+                      </div>
+                    </div>
+
+                    {/* Variant Search */}
+                    <div ref={comboSearchRef} className="relative">
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                        Tìm variant để thêm
+                      </label>
+                      <div className="relative">
+                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <input
+                          type="text"
+                          value={comboSearchKeyword}
+                          onChange={(e) => handleComboSearch(e.target.value)}
+                          onFocus={() => comboSearchKeyword.trim() && setShowComboSearch(true)}
+                          placeholder="Nhập SKU hoặc tên sản phẩm để tìm..."
+                          disabled={savingCombo}
+                          className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 disabled:bg-slate-50"
+                        />
+                        {comboSearchLoading && (
+                          <svg className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin h-4 w-4 text-violet-500" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        )}
+                      </div>
+
+                      {/* Search Results Dropdown (Products) */}
+                      {showComboSearch && (
+                        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                          {comboSearchResults.length === 0 ? (
+                            <div className="p-4 text-center text-sm text-slate-500">
+                              {comboSearchLoading ? "Đang tìm..." : "Không tìm thấy sản phẩm nào"}
+                            </div>
+                          ) : (
+                            comboSearchResults.map((prod) => (
+                              <button
+                                key={prod.id}
+                                onClick={() => handleComboSelectProduct(prod)}
+                                className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left hover:bg-violet-50 last:border-0"
+                              >
+                                <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-slate-100">
+                                  {prod.image ? (
+                                    <img src={buildImageUrl(prod.image)} alt="" className="h-full w-full object-cover" />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">IMG</div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium text-slate-900 truncate">{prod.name}</div>
+                                  <div className="text-xs text-slate-500">{prod.code} • {prod.totalVariants} variant</div>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      {/* Loading variants indicator */}
+                      {comboSelectedProduct && comboLoadingVariants && (
+                        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+                            <span className="text-sm text-slate-600">Đang tải phân loại...</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Variant selector grid */}
+                      {comboSelectedProduct && !comboLoadingVariants && comboVariants.length > 1 && (
+                        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 overflow-auto rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+                          <p className="mb-2 text-sm font-medium text-slate-700">
+                            Chọn phân loại cho: {comboSelectedProduct.name}
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            {comboVariants.map((variant) => {
+                              const attrText = variant.attributes
+                                ?.map((a: { productTypeValueName?: string | null }) => a.productTypeValueName)
+                                .filter(Boolean)
+                                .join(" / ") || "Mặc định";
+                              const isAlready = comboItems.some((item) => item.productVariantId === variant.id);
+                              const outOfStock = variant.stock <= 0;
+                              return (
+                                <button
+                                  key={variant.id}
+                                  onClick={() => !outOfStock && !isAlready && handleAddComboVariant(comboSelectedProduct!, variant)}
+                                  disabled={outOfStock || isAlready}
+                                  className={`rounded border p-2 text-left transition ${
+                                    isAlready
+                                      ? "border-violet-200 bg-violet-50 opacity-60 cursor-not-allowed"
+                                      : outOfStock
+                                      ? "cursor-not-allowed border-slate-100 bg-slate-50 opacity-60"
+                                      : "border-slate-200 hover:border-violet-400 hover:bg-violet-50"
+                                  }`}
+                                >
+                                  <p className="truncate text-xs font-medium text-slate-700">{attrText}</p>
+                                  <p className="text-xs text-slate-500">SKU: {variant.sku || "—"}</p>
+                                  <p className={`text-[10px] ${isAlready ? "text-violet-600 font-medium" : outOfStock ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                                    {isAlready ? "Đã thêm" : outOfStock ? "Hết hàng" : `Tồn: ${variant.stock.toLocaleString("vi-VN")}`}
+                                  </p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button onClick={resetComboSearch} className="mt-2 text-xs text-slate-500 hover:text-slate-700">Hủy</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Combo Items Table */}
+                    {comboItems.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-lg">
+                        <svg className="w-12 h-12 mx-auto mb-3 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                        <p className="text-sm">Chưa có sản phẩm nào trong combo</p>
+                        <p className="text-xs text-slate-400 mt-1">Sử dụng ô tìm kiếm phía trên để thêm variant</p>
+                      </div>
+                    ) : (
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full">
+                          <thead className="bg-slate-50 border-b">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700 w-12">STT</th>
+                              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Variant</th>
+                              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Sản phẩm</th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-slate-700 w-28">Số lượng</th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-slate-700 w-24">Tồn kho</th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-slate-700 w-16">Xóa</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {comboItems.map((item, index) => (
+                              <tr key={item.productVariantId} className="hover:bg-slate-50">
+                                <td className="px-4 py-3 text-sm text-slate-500">{index + 1}</td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    {item.productImage && (
+                                      <img
+                                        src={buildImageUrl(item.productImage)}
+                                        alt=""
+                                        className="w-10 h-10 rounded object-cover flex-shrink-0"
+                                      />
+                                    )}
+                                    <div className="font-medium text-sm text-slate-900">
+                                      {item.sku || `VAR-${item.productVariantId}`}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-slate-700">
+                                  {item.productName || "N/A"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={item.quantity}
+                                    onChange={(e) => handleComboItemQtyChange(item.productVariantId, parseInt(e.target.value) || 1)}
+                                    disabled={savingCombo}
+                                    className="w-full text-center rounded border border-slate-200 px-2 py-1.5 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 disabled:bg-slate-50"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-center text-sm text-slate-600">
+                                  {item.stock !== undefined && item.stock !== null ? item.stock : "—"}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveComboItem(item.productVariantId)}
+                                    disabled={savingCombo}
+                                    className="text-rose-500 hover:text-rose-700 disabled:opacity-50"
+                                  >
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Estimated combo stock info */}
+                    {comboItems.length > 0 && estimatedComboStock !== null && (
+                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-3">
+                        <svg className="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                        <div className="text-sm">
+                          <span className="font-medium text-emerald-800">Stock combo ước tính:</span>{" "}
+                          <span className="text-emerald-700 font-bold text-base">{estimatedComboStock}</span>{" "}
+                          <span className="text-emerald-600">combo</span>
+                          <div className="text-xs text-emerald-600 mt-0.5">
+                            = min({comboItems.map((item) => `${item.stock ?? "?"}/${item.quantity}`).join(", ")})
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Save button */}
+                    <div className="flex justify-end gap-3 border-t pt-6">
+                      <button
+                        onClick={() => loadComboItems()}
+                        disabled={savingCombo}
+                        className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Hủy thay đổi
+                      </button>
+                      <button
+                        onClick={handleSaveComboItems}
+                        disabled={savingCombo}
+                        className="px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {savingCombo ? "Đang lưu..." : "Lưu thay đổi"}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

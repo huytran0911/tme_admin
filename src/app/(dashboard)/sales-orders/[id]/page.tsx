@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { fetchSalesOrderById, updateSalesOrderStatus } from "@/features/sales-orders/api";
-import type { SalesOrderDetail, SalesOrderItem } from "@/features/sales-orders/types";
-import { ORDER_STATUS } from "@/features/sales-orders/types";
+import { fetchSalesOrderById, updateSalesOrderStatus, cancelSalesOrder } from "@/features/sales-orders/api";
+import type { SalesOrderDetail } from "@/features/sales-orders/types";
+import { ORDER_STATUS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, SALES_CHANNEL_LABELS } from "@/features/sales-orders/types";
+import type { PaymentMethod, PaymentStatus, SalesChannel } from "@/features/sales-orders/types";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { useToast } from "@/components/shared/Toast";
 import { formatDate } from "@/lib/utils";
@@ -13,13 +14,30 @@ import { formatDate } from "@/lib/utils";
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
     [ORDER_STATUS.NEW]: { label: "Mới", color: "bg-blue-50 text-blue-700 ring-blue-600/20" },
     [ORDER_STATUS.CONFIRMED]: { label: "Đã xác nhận", color: "bg-amber-50 text-amber-700 ring-amber-600/20" },
+    [ORDER_STATUS.PROCESSING]: { label: "Đang đóng gói", color: "bg-cyan-50 text-cyan-700 ring-cyan-600/20" },
     [ORDER_STATUS.SHIPPED]: { label: "Đang giao", color: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+    [ORDER_STATUS.DELIVERED]: { label: "Đã nhận hàng", color: "bg-teal-50 text-teal-700 ring-teal-600/20" },
     [ORDER_STATUS.COMPLETED]: { label: "Hoàn thành", color: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
     [ORDER_STATUS.CANCELLED]: { label: "Đã hủy", color: "bg-red-50 text-red-700 ring-red-600/20" },
 };
 
+const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+    UNPAID: { label: "Chưa thanh toán", color: "bg-red-50 text-red-700 ring-red-600/20" },
+    PARTIAL: { label: "Thanh toán 1 phần", color: "bg-amber-50 text-amber-700 ring-amber-600/20" },
+    PAID: { label: "Đã thanh toán", color: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
+};
+
 function StatusBadge({ status }: { status: string }) {
     const cfg = STATUS_CONFIG[status] ?? { label: status, color: "bg-slate-50 text-slate-600 ring-slate-500/20" };
+    return (
+        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${cfg.color}`}>
+            {cfg.label}
+        </span>
+    );
+}
+
+function PaymentStatusBadge({ status }: { status: string }) {
+    const cfg = PAYMENT_STATUS_CONFIG[status] ?? { label: status, color: "bg-slate-50 text-slate-600 ring-slate-500/20" };
     return (
         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${cfg.color}`}>
             {cfg.label}
@@ -36,13 +54,17 @@ function formatCurrency(value: number | null | undefined) {
 const STATUS_TRANSITIONS: Record<string, { nextStatus: string; label: string; color: string }[]> = {
     [ORDER_STATUS.NEW]: [
         { nextStatus: ORDER_STATUS.CONFIRMED, label: "Xác nhận đơn", color: "bg-amber-600 hover:bg-amber-700" },
-        { nextStatus: ORDER_STATUS.CANCELLED, label: "Hủy đơn", color: "bg-red-600 hover:bg-red-700" },
     ],
     [ORDER_STATUS.CONFIRMED]: [
+        { nextStatus: ORDER_STATUS.PROCESSING, label: "Đóng gói", color: "bg-cyan-600 hover:bg-cyan-700" },
+    ],
+    [ORDER_STATUS.PROCESSING]: [
         { nextStatus: ORDER_STATUS.SHIPPED, label: "Giao hàng", color: "bg-indigo-600 hover:bg-indigo-700" },
-        { nextStatus: ORDER_STATUS.CANCELLED, label: "Hủy đơn", color: "bg-red-600 hover:bg-red-700" },
     ],
     [ORDER_STATUS.SHIPPED]: [
+        { nextStatus: ORDER_STATUS.DELIVERED, label: "Đã nhận hàng", color: "bg-teal-600 hover:bg-teal-700" },
+    ],
+    [ORDER_STATUS.DELIVERED]: [
         { nextStatus: ORDER_STATUS.COMPLETED, label: "Hoàn thành", color: "bg-emerald-600 hover:bg-emerald-700" },
     ],
 };
@@ -56,6 +78,8 @@ export default function SalesOrderDetailPage() {
     const [order, setOrder] = useState<SalesOrderDetail | null>(null);
     const [loading, setLoading] = useState(true);
     const [updating, setUpdating] = useState(false);
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [cancelReason, setCancelReason] = useState("");
 
     const loadOrder = useCallback(async () => {
         if (!orderId || isNaN(orderId)) return;
@@ -91,6 +115,23 @@ export default function SalesOrderDetailPage() {
         }
     };
 
+    const handleCancel = async () => {
+        if (!order || !cancelReason.trim()) return;
+        setUpdating(true);
+        try {
+            await cancelSalesOrder(order.id, { reason: cancelReason.trim() });
+            notify({ message: "Đã hủy đơn hàng.", variant: "success" });
+            setShowCancelModal(false);
+            setCancelReason("");
+            await loadOrder();
+        } catch (err) {
+            console.error("Failed to cancel order:", err);
+            notify({ message: "Không thể hủy đơn hàng.", variant: "error" });
+        } finally {
+            setUpdating(false);
+        }
+    };
+
     // ─── Loading state ───────────────────────────────────────────────────────
     if (loading) {
         return (
@@ -119,8 +160,12 @@ export default function SalesOrderDetailPage() {
     }
 
     const transitions = STATUS_TRANSITIONS[order.status ?? ""] ?? [];
+    const canCancel = order.status !== ORDER_STATUS.COMPLETED && order.status !== ORDER_STATUS.CANCELLED;
     const mainItems = order.items.filter((i) => !i.parentItemId);
     const bundleChildren = (parentId: number) => order.items.filter((i) => i.parentItemId === parentId);
+
+    // Calculate saleOff total from items
+    const saleOffTotal = order.items.reduce((sum, item) => sum + (item.saleOffDiscount || 0) * item.quantity, 0);
 
     return (
         <div className="space-y-5">
@@ -167,12 +212,32 @@ export default function SalesOrderDetailPage() {
                         {updating ? "Đang xử lý..." : t.label}
                     </button>
                 ))}
+
+                {canCancel && (
+                    <button
+                        type="button"
+                        disabled={updating}
+                        onClick={() => setShowCancelModal(true)}
+                        className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-red-700 transition-colors disabled:opacity-50"
+                    >
+                        Hủy đơn
+                    </button>
+                )}
             </div>
+
+            {/* ── Cancel reason display ──────────────────────────────────────── */}
+            {order.status === ORDER_STATUS.CANCELLED && order.cancelReason && (
+                <div className="mx-2 rounded-lg border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm font-medium text-red-700">Lý do hủy:</p>
+                    <p className="mt-1 text-sm text-red-600">{order.cancelReason}</p>
+                </div>
+            )}
 
             {/* ── Content grid ───────────────────────────────────────────────── */}
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                {/* Left: Order items */}
-                <div className="lg:col-span-2">
+                {/* Left: Order items + Price breakdown */}
+                <div className="space-y-5 lg:col-span-2">
+                    {/* Items table */}
                     <div className="tme-table-card">
                         <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
                             <h3 className="text-sm font-semibold text-slate-700">Sản phẩm đặt hàng</h3>
@@ -191,6 +256,9 @@ export default function SalesOrderDetailPage() {
                                             SL
                                         </th>
                                         <th className="px-3 py-2.5 text-right text-[13px] font-semibold uppercase tracking-[0.05em] text-slate-500">
+                                            Giá gốc
+                                        </th>
+                                        <th className="px-3 py-2.5 text-right text-[13px] font-semibold uppercase tracking-[0.05em] text-slate-500">
                                             Đơn giá
                                         </th>
                                         <th className="px-3 py-2.5 text-right text-[13px] font-semibold uppercase tracking-[0.05em] text-slate-500">
@@ -201,7 +269,7 @@ export default function SalesOrderDetailPage() {
                                 <tbody className="divide-y divide-slate-100 bg-white">
                                     {mainItems.length === 0 ? (
                                         <tr>
-                                            <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
+                                            <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
                                                 Không có sản phẩm.
                                             </td>
                                         </tr>
@@ -216,18 +284,79 @@ export default function SalesOrderDetailPage() {
                                 </tbody>
                             </table>
                         </div>
+                    </div>
 
-                        {/* Total row */}
-                        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
-                            <span className="text-sm font-semibold text-slate-700">Tổng cộng</span>
-                            <span className="text-lg font-bold text-emerald-600">
-                                {formatCurrency(order.totalAmount)}
-                            </span>
+                    {/* Price breakdown */}
+                    <div className="rounded-lg border border-slate-200 bg-white">
+                        <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                            <h3 className="text-sm font-semibold text-slate-700">Chi tiết thanh toán</h3>
+                        </div>
+                        <div className="p-4">
+                            <table className="w-full text-sm">
+                                <tbody>
+                                    <tr>
+                                        <td className="py-1.5 text-slate-600">Tạm tính:</td>
+                                        <td className="py-1.5 text-right font-medium text-slate-800">
+                                            {formatCurrency(order.subtotal)}
+                                        </td>
+                                    </tr>
+                                    {saleOffTotal > 0 && (
+                                        <tr>
+                                            <td className="py-1.5 text-slate-600">Giảm giá (Sale Off):</td>
+                                            <td className="py-1.5 text-right text-rose-600">
+                                                -{formatCurrency(saleOffTotal)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {order.promotionDiscount > 0 && (
+                                        <tr>
+                                            <td className="py-1.5 text-slate-600">Khuyến mãi (Promotion):</td>
+                                            <td className="py-1.5 text-right text-rose-600">
+                                                -{formatCurrency(order.promotionDiscount)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {order.couponDiscount > 0 && (
+                                        <tr>
+                                            <td className="py-1.5 text-slate-600">
+                                                Mã giảm giá{order.couponCode ? ` (${order.couponCode})` : ""}:
+                                            </td>
+                                            <td className="py-1.5 text-right text-rose-600">
+                                                -{formatCurrency(order.couponDiscount)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {order.shippingFee > 0 && (
+                                        <tr>
+                                            <td className="py-1.5 text-slate-600">Phí vận chuyển:</td>
+                                            <td className="py-1.5 text-right text-slate-800">
+                                                +{formatCurrency(order.shippingFee)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    <tr className="border-t border-slate-200">
+                                        <td className="py-2 text-base font-semibold text-slate-800">
+                                            Tổng thanh toán:
+                                        </td>
+                                        <td className="py-2 text-right text-lg font-bold text-emerald-600">
+                                            {formatCurrency(order.finalAmount || order.totalAmount)}
+                                        </td>
+                                    </tr>
+                                    {order.paidAmount > 0 && order.paidAmount !== (order.finalAmount || order.totalAmount || 0) && (
+                                        <tr>
+                                            <td className="py-1.5 text-slate-600">Đã thanh toán:</td>
+                                            <td className="py-1.5 text-right font-medium text-emerald-700">
+                                                {formatCurrency(order.paidAmount)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
-                {/* Right: Customer info + meta */}
+                {/* Right: Info cards */}
                 <div className="space-y-5">
                     {/* Customer info */}
                     <div className="rounded-lg border border-slate-200 bg-white">
@@ -245,6 +374,61 @@ export default function SalesOrderDetailPage() {
                             </table>
                         </div>
                     </div>
+
+                    {/* Payment info */}
+                    <div className="rounded-lg border border-slate-200 bg-white">
+                        <div className="border-b border-slate-200 bg-indigo-50 px-4 py-2.5">
+                            <h3 className="text-sm font-semibold text-slate-800">Thanh toán</h3>
+                        </div>
+                        <div className="p-4">
+                            <table className="w-full text-sm">
+                                <tbody>
+                                    <tr>
+                                        <td className="w-28 py-1.5 pr-2 text-slate-500">Phương thức:</td>
+                                        <td className="py-1.5 font-medium text-slate-800">
+                                            {PAYMENT_METHOD_LABELS[order.paymentMethod as PaymentMethod] ?? order.paymentMethod ?? "-"}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="w-28 py-1.5 pr-2 text-slate-500">Trạng thái:</td>
+                                        <td className="py-1.5">
+                                            <PaymentStatusBadge status={order.paymentStatus} />
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="w-28 py-1.5 pr-2 text-slate-500">Kênh bán:</td>
+                                        <td className="py-1.5 font-medium text-slate-800">
+                                            {SALES_CHANNEL_LABELS[order.channel as SalesChannel] ?? order.channel ?? "-"}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Shipping info */}
+                    {(order.shippingMethod || order.carrier || order.trackingNumber) && (
+                        <div className="rounded-lg border border-slate-200 bg-white">
+                            <div className="border-b border-slate-200 bg-blue-50 px-4 py-2.5">
+                                <h3 className="text-sm font-semibold text-slate-800">Vận chuyển</h3>
+                            </div>
+                            <div className="p-4">
+                                <table className="w-full text-sm">
+                                    <tbody>
+                                        {order.shippingMethod && <InfoRow label="Phương thức" value={order.shippingMethod} />}
+                                        {order.carrier && <InfoRow label="Đơn vị" value={order.carrier} />}
+                                        {order.trackingNumber && <InfoRow label="Mã vận đơn" value={order.trackingNumber} />}
+                                        {order.expectedDeliveryDate && (
+                                            <InfoRow label="Dự kiến" value={formatDate(order.expectedDeliveryDate, "dd/MM/yyyy")} />
+                                        )}
+                                        {order.actualDeliveryDate && (
+                                            <InfoRow label="Thực tế" value={formatDate(order.actualDeliveryDate, "dd/MM/yyyy")} />
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Note */}
                     {order.note && (
@@ -266,14 +450,53 @@ export default function SalesOrderDetailPage() {
                                 <tbody>
                                     <InfoRow label="Ngày tạo" value={formatDate(order.createdAt, "dd/MM/yyyy")} />
                                     <InfoRow label="Người tạo" value={order.createdBy} />
-                                    <InfoRow label="Cập nhật" value={formatDate(order.updatedAt, "dd/MM/yyyy")} />
-                                    <InfoRow label="Người cập nhật" value={order.updatedBy} />
+                                    {order.updatedAt && (
+                                        <InfoRow label="Cập nhật" value={formatDate(order.updatedAt, "dd/MM/yyyy")} />
+                                    )}
+                                    {order.updatedBy && <InfoRow label="Người CN" value={order.updatedBy} />}
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* ── Cancel Modal ───────────────────────────────────────────────── */}
+            {showCancelModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+                        <h3 className="text-lg font-semibold text-slate-900">Hủy đơn hàng</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                            Vui lòng nhập lý do hủy đơn hàng <strong>{order.orderCode}</strong>
+                        </p>
+                        <textarea
+                            value={cancelReason}
+                            onChange={(e) => setCancelReason(e.target.value)}
+                            placeholder="Nhập lý do hủy đơn..."
+                            rows={3}
+                            className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+                            autoFocus
+                        />
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => { setShowCancelModal(false); setCancelReason(""); }}
+                                className="rounded-md border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!cancelReason.trim() || updating}
+                                onClick={handleCancel}
+                                className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-red-700 transition-colors disabled:opacity-50"
+                            >
+                                {updating ? "Đang xử lý..." : "Xác nhận hủy"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -290,6 +513,7 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
 }
 
 function ItemRows({ item, children }: { item: SalesOrderDetail["items"][0]; children: SalesOrderDetail["items"] }) {
+    const hasDiscount = item.originalPrice > 0 && item.originalPrice !== item.unitPrice;
     return (
         <>
             <tr className="hover:bg-slate-50/60">
@@ -300,11 +524,23 @@ function ItemRows({ item, children }: { item: SalesOrderDetail["items"][0]; chil
                                 COMBO
                             </span>
                         )}
-                        <span>{item.productName || "-"}</span>
+                        <div>
+                            <span>{item.productName || "-"}</span>
+                            {item.variantName && item.variantName !== item.sku && (
+                                <span className="ml-1 text-xs text-slate-400">({item.variantName})</span>
+                            )}
+                        </div>
                     </div>
                 </td>
                 <td className="px-3 py-2 text-sm text-slate-600">{item.sku || "-"}</td>
                 <td className="px-3 py-2 text-sm text-slate-900 text-right">{item.quantity}</td>
+                <td className="px-3 py-2 text-sm text-right">
+                    {hasDiscount ? (
+                        <span className="text-slate-400 line-through">{formatCurrency(item.originalPrice)}</span>
+                    ) : (
+                        <span className="text-slate-400">-</span>
+                    )}
+                </td>
                 <td className="px-3 py-2 text-sm text-slate-900 text-right">{formatCurrency(item.unitPrice)}</td>
                 <td className="px-3 py-2 text-sm font-semibold text-slate-900 text-right">{formatCurrency(item.lineTotal)}</td>
             </tr>
@@ -316,6 +552,7 @@ function ItemRows({ item, children }: { item: SalesOrderDetail["items"][0]; chil
                     </td>
                     <td className="px-3 py-1.5 text-sm text-slate-500">{child.sku || "-"}</td>
                     <td className="px-3 py-1.5 text-sm text-slate-600 text-right">{child.quantity}</td>
+                    <td className="px-3 py-1.5 text-sm text-right text-slate-400">-</td>
                     <td className="px-3 py-1.5 text-sm text-slate-600 text-right">{formatCurrency(child.unitPrice)}</td>
                     <td className="px-3 py-1.5 text-sm text-slate-600 text-right">{formatCurrency(child.lineTotal)}</td>
                 </tr>
@@ -323,5 +560,3 @@ function ItemRows({ item, children }: { item: SalesOrderDetail["items"][0]; chil
         </>
     );
 }
-
-

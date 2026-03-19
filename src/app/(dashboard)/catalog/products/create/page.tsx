@@ -13,6 +13,7 @@ import {
   fetchViewData,
   type ViewDataItem,
 } from "@/features/products/api";
+import { createProductVariant } from "@/features/product-variants/api";
 import { fetchSuppliers } from "@/features/suppliers/api";
 import type { Supplier } from "@/features/suppliers/types";
 import type {
@@ -383,6 +384,7 @@ type FormData = {
   nameEn: string;
   status: number;
   isNewProduct: boolean;
+  isCombo: boolean;
   sort: number;
   pointSave: number;
   unit: string;
@@ -402,6 +404,7 @@ const initialFormData: FormData = {
   nameEn: "",
   status: 0,
   isNewProduct: false,
+  isCombo: false,
   sort: 0,
   pointSave: 0,
   unit: "",
@@ -499,6 +502,7 @@ function CreateProductPageContent() {
         nameEn: formData.nameEn || null,
         status: formData.status,
         isNewProduct: formData.isNewProduct,
+        isCombo: formData.isCombo,
         sort: formData.sort,
         pointSave: formData.pointSave,
         unit: formData.unit || null,
@@ -515,6 +519,22 @@ function CreateProductPageContent() {
       };
 
       const newProductId = await createProduct(payload);
+
+      // For combo products, auto-create a default variant
+      if (formData.isCombo) {
+        try {
+          await createProductVariant(newProductId, {
+            sku: formData.code ? `${formData.code}-COMBO` : undefined,
+            stock: 0,
+            status: true,
+            options: [],
+          });
+        } catch (variantError) {
+          console.error("Auto-create combo variant error:", variantError);
+          // Don't block redirect — product was created successfully
+        }
+      }
+
       notify({ message: "Đã tạo sản phẩm thành công!", variant: "success" });
 
       // Redirect to edit page
@@ -596,7 +616,29 @@ function CreateProductPageContent() {
                   />
                   <span className="text-sm font-medium text-slate-700">Sản phẩm mới</span>
                 </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.isCombo}
+                    onChange={(e) => handleFieldChange("isCombo", e.target.checked)}
+                    disabled={saving}
+                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-200"
+                  />
+                  <span className="text-sm font-medium text-slate-700">Sản phẩm Combo</span>
+                </label>
               </div>
+              {formData.isCombo && (
+                <div className="md:col-span-2">
+                  <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg flex items-start gap-2">
+                    <svg className="w-5 h-5 text-violet-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="text-sm text-violet-700">
+                      Sản phẩm combo chứa nhiều variant con bên trong. Sau khi tạo, bạn có thể quản lý thành phần combo trong tab <strong>&quot;Thành phần Combo&quot;</strong> ở trang chỉnh sửa.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Tên sản phẩm */}
               <div>

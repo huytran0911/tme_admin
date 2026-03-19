@@ -4,9 +4,16 @@
 import { createPortal } from "react-dom";
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { fetchCategories } from "@/features/categories/api";
-import { fetchProductsForSelection, addProductsToSaleOff, fetchSaleOffProducts, removeProductFromSaleOff, updateSaleOffProduct } from "@/features/sale-off/api";
+import {
+  fetchProductsForSelection,
+  fetchVariantsForProduct,
+  addProductsToSaleOff,
+  fetchSaleOffProducts,
+  removeProductFromSaleOff,
+  updateSaleOffProduct,
+} from "@/features/sale-off/api";
 import type { Category } from "@/features/categories/types";
-import type { ProductForSelection, SaleOffProduct } from "@/features/sale-off/types";
+import type { ProductForSelection, SaleOffProduct, VariantForSelection } from "@/features/sale-off/types";
 import { buildImageUrl } from "@/lib/utils";
 import { useToast } from "@/components/shared/Toast";
 
@@ -18,12 +25,25 @@ type ProductManagementPopupProps = {
   onSuccess?: () => void;
 };
 
-// Product to add with sale off value and quantity
-type ProductToAdd = {
+// Variant to add with sale off value and quantity
+type VariantToAdd = {
   product: ProductForSelection;
+  variant: VariantForSelection;
   saleOffValue: number;
   quantity: number;
 };
+
+// Helper to get base price from variant's price tiers
+function getVariantBasePrice(variant: VariantForSelection): number {
+  const baseTier = variant.priceTiers?.find((pt) => pt.minQty === 1);
+  return baseTier?.price ?? variant.basePrice ?? 0;
+}
+
+// Helper to format variant options as display string
+function formatVariantOptions(variant: VariantForSelection): string {
+  if (!variant.options || variant.options.length === 0) return "Mặc định";
+  return variant.options.map((opt) => `${opt.productTypeName}: ${opt.productTypeValueName}`).join(", ");
+}
 
 export function ProductManagementPopup({
   open,
@@ -53,8 +73,14 @@ export function ProductManagementPopup({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const PAGE_SIZE = 20;
 
-  // Products to add (pending)
-  const [productsToAdd, setProductsToAdd] = useState<ProductToAdd[]>([]);
+  // Variants for selected product (variant picker)
+  const [variantPickerProductId, setVariantPickerProductId] = useState<number | null>(null);
+  const [variantPickerProduct, setVariantPickerProduct] = useState<ProductForSelection | null>(null);
+  const [variants, setVariants] = useState<VariantForSelection[]>([]);
+  const [loadingVariants, setLoadingVariants] = useState(false);
+
+  // Variants to add (pending)
+  const [variantsToAdd, setVariantsToAdd] = useState<VariantToAdd[]>([]);
 
   // Existing products in sale-off
   const [existingProducts, setExistingProducts] = useState<SaleOffProduct[]>([]);
@@ -62,9 +88,6 @@ export function ProductManagementPopup({
 
   // Saving state
   const [saving, setSaving] = useState(false);
-
-  // Add all products in category state
-  const [addingAllInCategory, setAddingAllInCategory] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -103,13 +126,13 @@ export function ProductManagementPopup({
     loadExistingProducts();
   }, [loadExistingProducts]);
 
-  // Get excluded product IDs (already added or in existing list)
-  const excludedIds = useMemo(() => {
+  // Get excluded variant IDs (already added or in existing list)
+  const excludedVariantIds = useMemo(() => {
     return new Set([
-      ...existingProducts.map((p) => p.productId),
-      ...productsToAdd.map((p) => p.product.id),
+      ...existingProducts.map((p) => p.variantId),
+      ...variantsToAdd.map((v) => v.variant.id),
     ]);
-  }, [existingProducts, productsToAdd]);
+  }, [existingProducts, variantsToAdd]);
 
   // Load products (first page) when category or search changes
   const loadProducts = useCallback(async (reset = true) => {
@@ -132,15 +155,12 @@ export function ProductManagementPopup({
         pageSize: PAGE_SIZE,
       });
 
-      const newItems = data.items.filter((p) => !excludedIds.has(p.id));
-
       if (reset) {
-        setProducts(newItems);
+        setProducts(data.items);
       } else {
-        setProducts((prev) => [...prev, ...newItems]);
+        setProducts((prev) => [...prev, ...data.items]);
       }
 
-      // Check if there are more products
       setHasMoreProducts(data.items.length === PAGE_SIZE);
       if (!reset) {
         setProductPage((prev) => prev + 1);
@@ -152,7 +172,7 @@ export function ProductManagementPopup({
       setLoadingProducts(false);
       setLoadingMore(false);
     }
-  }, [open, selectedCategoryId, productSearch, productPage, excludedIds]);
+  }, [open, selectedCategoryId, productSearch, productPage]);
 
   // Load products when category changes
   useEffect(() => {
@@ -198,92 +218,40 @@ export function ProductManagementPopup({
   useEffect(() => {
     if (!open) {
       setSelectedCategoryId(undefined);
-      setProductsToAdd([]);
+      setVariantsToAdd([]);
       setProducts([]);
       setProductPage(1);
       setHasMoreProducts(true);
       setProductDropdownOpen(false);
       setProductSearch("");
       setSelectedProductIds(new Set());
+      setVariantPickerProductId(null);
+      setVariantPickerProduct(null);
+      setVariants([]);
     }
   }, [open]);
 
-  // Toggle product selection in dropdown
-  const toggleProductSelection = (productId: number) => {
-    setSelectedProductIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(productId)) {
-        next.delete(productId);
-      } else {
-        next.add(productId);
-      }
-      return next;
-    });
-  };
-
-  // Add all selected products to pending list
-  const handleAddSelectedProducts = () => {
-    const selectedProducts = products.filter((p) => selectedProductIds.has(p.id));
-    const newProductsToAdd = selectedProducts.map((product) => ({
-      product,
-      saleOffValue: 0,
-      quantity: 1,
-    }));
-    setProductsToAdd((prev) => [...prev, ...newProductsToAdd]);
-    setSelectedProductIds(new Set());
-    setProductDropdownOpen(false);
-  };
-
-  // Select all visible products
-  const handleSelectAll = () => {
-    if (selectedProductIds.size === products.length) {
-      setSelectedProductIds(new Set());
-    } else {
-      setSelectedProductIds(new Set(products.map((p) => p.id)));
-    }
-  };
-
-  // Add all products in the selected category
-  const handleAddAllInCategory = async () => {
-    if (!selectedCategoryId) {
-      notify({ message: "Vui lòng chọn danh mục trước.", variant: "info" });
+  // Load variants when a product is selected for variant picking
+  useEffect(() => {
+    if (!variantPickerProductId) {
+      setVariants([]);
       return;
     }
-
-    setAddingAllInCategory(true);
-    try {
-      // Fetch all products in category with large page size
-      const data = await fetchProductsForSelection({
-        categoryId: selectedCategoryId,
-        keyword: undefined,
-        page: 1,
-        pageSize: 9999,
-      });
-
-      // Filter out already added products
-      const newProducts = data.items.filter((p) => !excludedIds.has(p.id));
-
-      if (newProducts.length === 0) {
-        notify({ message: "Không có sản phẩm mới nào để thêm trong danh mục này.", variant: "info" });
-        return;
+    const loadVariants = async () => {
+      setLoadingVariants(true);
+      try {
+        const data = await fetchVariantsForProduct(variantPickerProductId);
+        // Filter out already-added variants
+        setVariants(data.filter((v) => v.status && !excludedVariantIds.has(v.id)));
+      } catch (err) {
+        console.error("Failed to load variants:", err);
+        setVariants([]);
+      } finally {
+        setLoadingVariants(false);
       }
-
-      // Add all to pending list
-      const newProductsToAdd = newProducts.map((product) => ({
-        product,
-        saleOffValue: 0,
-        quantity: 1,
-      }));
-
-      setProductsToAdd((prev) => [...prev, ...newProductsToAdd]);
-      notify({ message: `Đã thêm ${newProducts.length} sản phẩm từ danh mục.`, variant: "success" });
-    } catch (err) {
-      console.error("Failed to add all products in category:", err);
-      notify({ message: "Không thể thêm sản phẩm từ danh mục.", variant: "error" });
-    } finally {
-      setAddingAllInCategory(false);
-    }
-  };
+    };
+    loadVariants();
+  }, [variantPickerProductId, excludedVariantIds]);
 
   // Build category tree for dropdown
   const categoryOptions = useMemo(() => {
@@ -300,65 +268,90 @@ export function ProductManagementPopup({
     return buildTree(categories);
   }, [categories]);
 
-  // Add product to pending list
-  const handleAddProduct = (product: ProductForSelection) => {
-    setProductsToAdd((prev) => [
+  // Open variant picker for a product
+  const handleOpenVariantPicker = (product: ProductForSelection) => {
+    setVariantPickerProductId(product.id);
+    setVariantPickerProduct(product);
+    setProductDropdownOpen(false);
+  };
+
+  // Add a variant to pending list
+  const handleAddVariant = (product: ProductForSelection, variant: VariantForSelection) => {
+    if (excludedVariantIds.has(variant.id)) return;
+    setVariantsToAdd((prev) => [
       ...prev,
       {
         product,
+        variant,
         saleOffValue: 0,
         quantity: 1,
       },
     ]);
   };
 
-  // Remove product from pending list
-  const handleRemovePending = (productId: number) => {
-    setProductsToAdd((prev) => prev.filter((p) => p.product.id !== productId));
+  // Add all variants of selected product
+  const handleAddAllVariants = () => {
+    if (!variantPickerProduct || variants.length === 0) return;
+    const newVariants = variants
+      .filter((v) => !excludedVariantIds.has(v.id))
+      .map((variant) => ({
+        product: variantPickerProduct,
+        variant,
+        saleOffValue: 0,
+        quantity: 1,
+      }));
+    setVariantsToAdd((prev) => [...prev, ...newVariants]);
+    setVariantPickerProductId(null);
+    setVariantPickerProduct(null);
+    notify({ message: `Đã thêm ${newVariants.length} phân loại.`, variant: "success" });
   };
 
-  // Update pending product values
-  const handleUpdatePending = (productId: number, field: "saleOffValue" | "quantity", value: number) => {
-    setProductsToAdd((prev) =>
-      prev.map((p) => (p.product.id === productId ? { ...p, [field]: value } : p))
+  // Remove variant from pending list
+  const handleRemovePending = (variantId: number) => {
+    setVariantsToAdd((prev) => prev.filter((v) => v.variant.id !== variantId));
+  };
+
+  // Update pending variant values
+  const handleUpdatePending = (variantId: number, field: "saleOffValue" | "quantity", value: number) => {
+    setVariantsToAdd((prev) =>
+      prev.map((v) => (v.variant.id === variantId ? { ...v, [field]: value } : v))
     );
   };
 
   // Remove existing product from sale-off
-  const handleRemoveExisting = async (productId: number) => {
+  const handleRemoveExisting = async (variantId: number) => {
     try {
-      await removeProductFromSaleOff(saleOffId, productId);
-      setExistingProducts((prev) => prev.filter((p) => p.productId !== productId));
-      notify({ message: "Đã xóa sản phẩm.", variant: "success" });
+      await removeProductFromSaleOff(saleOffId, variantId);
+      setExistingProducts((prev) => prev.filter((p) => p.variantId !== variantId));
+      notify({ message: "Đã xóa phân loại.", variant: "success" });
     } catch {
-      notify({ message: "Xóa sản phẩm thất bại.", variant: "error" });
+      notify({ message: "Xóa thất bại.", variant: "error" });
     }
   };
 
   // Update existing product
-  const handleUpdateExisting = async (productId: number, saleOffValue: number, quantity: number) => {
+  const handleUpdateExisting = async (variantId: number, saleOffValue: number, quantity: number) => {
     try {
-      await updateSaleOffProduct(saleOffId, productId, { saleOffValue, quantity });
+      await updateSaleOffProduct(saleOffId, variantId, { saleOffValue, quantity });
       setExistingProducts((prev) =>
-        prev.map((p) => (p.productId === productId ? { ...p, saleOffValue, quantity } : p))
+        prev.map((p) => (p.variantId === variantId ? { ...p, saleOffValue, quantity } : p))
       );
-      notify({ message: "Đã cập nhật sản phẩm.", variant: "success" });
+      notify({ message: "Đã cập nhật.", variant: "success" });
     } catch {
       notify({ message: "Cập nhật thất bại.", variant: "error" });
     }
   };
 
-  // Save pending products
+  // Save pending variants
   const handleSave = async () => {
-    if (productsToAdd.length === 0) {
-      notify({ message: "Chưa có sản phẩm nào để thêm.", variant: "info" });
+    if (variantsToAdd.length === 0) {
+      notify({ message: "Chưa có phân loại nào để thêm.", variant: "info" });
       return;
     }
 
-    // Validate
-    for (const item of productsToAdd) {
+    for (const item of variantsToAdd) {
       if (item.quantity < 1) {
-        notify({ message: `Số lượng của "${item.product.name}" phải >= 1.`, variant: "error" });
+        notify({ message: `Số lượng phải >= 1.`, variant: "error" });
         return;
       }
     }
@@ -366,20 +359,20 @@ export function ProductManagementPopup({
     setSaving(true);
     try {
       const request = {
-        products: productsToAdd.map((p) => ({
-          productId: p.product.id,
-          saleOffValue: p.saleOffValue,
-          quantity: p.quantity,
+        products: variantsToAdd.map((v) => ({
+          variantId: v.variant.id,
+          saleOffValue: v.saleOffValue,
+          quantity: v.quantity,
         })),
       };
       await addProductsToSaleOff(saleOffId, request);
-      notify({ message: `Đã thêm ${productsToAdd.length} sản phẩm.`, variant: "success" });
-      setProductsToAdd([]);
+      notify({ message: `Đã thêm ${variantsToAdd.length} phân loại.`, variant: "success" });
+      setVariantsToAdd([]);
       loadExistingProducts();
       onSuccess?.();
     } catch (err) {
-      console.error("Failed to add products:", err);
-      notify({ message: "Thêm sản phẩm thất bại.", variant: "error" });
+      console.error("Failed to add variants:", err);
+      notify({ message: "Thêm thất bại.", variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -412,7 +405,7 @@ export function ProductManagementPopup({
         <div className="flex-1 overflow-auto p-6">
           {/* Add Product Section */}
           <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <h3 className="mb-3 text-sm font-semibold text-slate-700">Thêm sản phẩm</h3>
+            <h3 className="mb-3 text-sm font-semibold text-slate-700">Thêm phân loại sản phẩm</h3>
             <div className="flex flex-wrap items-end gap-3">
               {/* Category Dropdown */}
               <div className="min-w-50 flex-1">
@@ -433,34 +426,7 @@ export function ProductManagementPopup({
                 </select>
               </div>
 
-              {/* Add All in Category Button */}
-              {selectedCategoryId && (
-                <button
-                  type="button"
-                  onClick={handleAddAllInCategory}
-                  disabled={addingAllInCategory}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {addingAllInCategory ? (
-                    <>
-                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Đang thêm...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                      </svg>
-                      Thêm toàn bộ danh mục
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* Product Dropdown with Multi-Select */}
+              {/* Product Dropdown */}
               <div className="min-w-75 flex-2 relative" ref={dropdownRef}>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Sản phẩm</label>
                 <button
@@ -468,11 +434,7 @@ export function ProductManagementPopup({
                   onClick={() => setProductDropdownOpen(!productDropdownOpen)}
                   className="flex w-full items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                 >
-                  <span className={selectedProductIds.size > 0 ? "text-slate-900" : "text-slate-500"}>
-                    {selectedProductIds.size > 0
-                      ? `Đã chọn ${selectedProductIds.size} sản phẩm`
-                      : "Chọn sản phẩm để thêm..."}
-                  </span>
+                  <span className="text-slate-500">Chọn sản phẩm để xem phân loại...</span>
                   <svg className={`h-4 w-4 text-slate-400 transition-transform ${productDropdownOpen ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                   </svg>
@@ -492,21 +454,6 @@ export function ProductManagementPopup({
                         autoFocus
                       />
                     </div>
-
-                    {/* Select All */}
-                    {!loadingProducts && products.length > 0 && (
-                      <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 bg-slate-50">
-                        <input
-                          type="checkbox"
-                          checked={products.length > 0 && selectedProductIds.size === products.length}
-                          onChange={handleSelectAll}
-                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        <span className="text-sm font-medium text-slate-700">
-                          Chọn tất cả ({products.length})
-                        </span>
-                      </div>
-                    )}
 
                     {/* Product List */}
                     <div
@@ -528,20 +475,12 @@ export function ProductManagementPopup({
                       ) : (
                         <>
                           {products.map((product) => (
-                            <label
+                            <button
                               key={product.id}
-                              className={`flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors ${
-                                selectedProductIds.has(product.id)
-                                  ? "bg-emerald-50"
-                                  : "hover:bg-slate-50"
-                              }`}
+                              type="button"
+                              onClick={() => handleOpenVariantPicker(product)}
+                              className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-slate-50"
                             >
-                              <input
-                                type="checkbox"
-                                checked={selectedProductIds.has(product.id)}
-                                onChange={() => toggleProductSelection(product.id)}
-                                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                              />
                               {product.image ? (
                                 <img
                                   src={buildImageUrl(product.image)}
@@ -559,15 +498,14 @@ export function ProductManagementPopup({
                                 <p className="truncate text-sm font-medium text-slate-900">{product.name}</p>
                                 <p className="text-xs text-slate-500">
                                   {product.code && <span className="mr-2">{product.code}</span>}
-                                  {product.price != null && (
-                                    <span className="text-emerald-600 font-medium">{product.price.toLocaleString("vi-VN")}đ</span>
-                                  )}
                                 </p>
                               </div>
-                            </label>
+                              <svg className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                              </svg>
+                            </button>
                           ))}
 
-                          {/* Load More Indicator */}
                           {loadingMore && (
                             <div className="flex items-center justify-center py-3 border-t border-slate-100">
                               <svg className="h-4 w-4 animate-spin text-emerald-500 mr-2" fill="none" viewBox="0 0 24 24">
@@ -586,50 +524,101 @@ export function ProductManagementPopup({
                         </>
                       )}
                     </div>
-
-                    {/* Footer with Add Button */}
-                    {selectedProductIds.size > 0 && (
-                      <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-2">
-                        <span className="text-sm text-slate-600">
-                          Đã chọn <span className="font-semibold text-emerald-600">{selectedProductIds.size}</span> sản phẩm
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleAddSelectedProducts}
-                          className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600"
-                        >
-                          Thêm vào danh sách
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Variant Picker Panel */}
+            {variantPickerProductId && variantPickerProduct && (
+              <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-semibold text-slate-700">
+                      Phân loại: <span className="text-emerald-600">{variantPickerProduct.name}</span>
+                    </h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {variants.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAddAllVariants}
+                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                      >
+                        Thêm tất cả ({variants.length})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => { setVariantPickerProductId(null); setVariantPickerProduct(null); }}
+                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {loadingVariants ? (
+                  <div className="flex items-center justify-center py-4">
+                    <svg className="h-5 w-5 animate-spin text-emerald-500" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  </div>
+                ) : variants.length === 0 ? (
+                  <p className="py-3 text-center text-sm text-slate-500">Không có phân loại khả dụng</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {variants.map((variant) => (
+                      <button
+                        key={variant.id}
+                        type="button"
+                        onClick={() => handleAddVariant(variantPickerProduct, variant)}
+                        disabled={excludedVariantIds.has(variant.id)}
+                        className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <div>
+                          <p className="font-medium text-slate-800">{formatVariantOptions(variant)}</p>
+                          <p className="text-xs text-slate-500">
+                            SKU: {variant.sku || "N/A"} · Tồn: {variant.stock}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-emerald-600">
+                          {getVariantBasePrice(variant).toLocaleString("vi-VN")}đ
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Pending Products Table */}
-          {productsToAdd.length > 0 && (
+          {/* Pending Variants Table */}
+          {variantsToAdd.length > 0 && (
             <div className="mb-6">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
-                  {productsToAdd.length}
+                  {variantsToAdd.length}
                 </span>
-                Sản phẩm sẽ thêm
+                Phân loại sẽ thêm
               </h3>
               <div className="overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50">
                 <table className="w-full text-sm">
                   <thead className="bg-emerald-100 text-left text-xs font-semibold uppercase text-emerald-800">
                     <tr>
-                      <th className="px-3 py-2">Sản phẩm</th>
-                      <th className="px-3 py-2 text-center w-32">Giảm giá (%)</th>
+                      <th className="px-3 py-2">Sản phẩm / Phân loại</th>
+                      <th className="px-3 py-2 text-right">Giá gốc</th>
+                      <th className="px-3 py-2 text-center w-32">Giảm giá (VNĐ)</th>
                       <th className="px-3 py-2 text-center w-28">Số lượng</th>
                       <th className="px-3 py-2 text-center w-20"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-emerald-100">
-                    {productsToAdd.map((item) => (
-                      <tr key={item.product.id} className="bg-white">
+                    {variantsToAdd.map((item) => (
+                      <tr key={item.variant.id} className="bg-white">
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             {item.product.image && (
@@ -641,19 +630,23 @@ export function ProductManagementPopup({
                             )}
                             <div className="min-w-0">
                               <p className="truncate font-medium text-slate-900">{item.product.name}</p>
-                              {item.product.code && (
-                                <p className="text-xs text-slate-500">{item.product.code}</p>
-                              )}
+                              <p className="text-xs text-slate-500">
+                                {formatVariantOptions(item.variant)}
+                                {item.variant.sku && <span className="ml-1 text-slate-400">· {item.variant.sku}</span>}
+                              </p>
                             </div>
                           </div>
+                        </td>
+                        <td className="px-3 py-2 text-right text-slate-600 whitespace-nowrap">
+                          {getVariantBasePrice(item.variant).toLocaleString("vi-VN")}đ
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input
                             type="number"
                             min={0}
                             value={item.saleOffValue}
-                            onChange={(e) => handleUpdatePending(item.product.id, "saleOffValue", Number(e.target.value))}
-                            className="w-20 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200"
+                            onChange={(e) => handleUpdatePending(item.variant.id, "saleOffValue", Number(e.target.value))}
+                            className="w-24 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200"
                           />
                         </td>
                         <td className="px-3 py-2 text-center">
@@ -661,14 +654,14 @@ export function ProductManagementPopup({
                             type="number"
                             min={1}
                             value={item.quantity}
-                            onChange={(e) => handleUpdatePending(item.product.id, "quantity", Number(e.target.value))}
+                            onChange={(e) => handleUpdatePending(item.variant.id, "quantity", Number(e.target.value))}
                             className="w-20 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200"
                           />
                         </td>
                         <td className="px-3 py-2 text-center">
                           <button
                             type="button"
-                            onClick={() => handleRemovePending(item.product.id)}
+                            onClick={() => handleRemovePending(item.variant.id)}
                             className="rounded p-1 text-rose-500 hover:bg-rose-50"
                             title="Xóa"
                           >
@@ -704,7 +697,7 @@ export function ProductManagementPopup({
                       <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
                       </svg>
-                      Thêm {productsToAdd.length} sản phẩm
+                      Thêm {variantsToAdd.length} phân loại
                     </>
                   )}
                 </button>
@@ -718,23 +711,23 @@ export function ProductManagementPopup({
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
                 {existingProducts.length}
               </span>
-              Sản phẩm đã áp dụng
+              Phân loại đã áp dụng
             </h3>
 
             {loadingExisting ? (
               <div className="py-8 text-center text-sm text-slate-500">Đang tải...</div>
             ) : existingProducts.length === 0 ? (
               <div className="rounded-xl border border-slate-200 bg-slate-50 py-8 text-center text-sm text-slate-500">
-                Chưa có sản phẩm nào được áp dụng giảm giá.
+                Chưa có phân loại nào được áp dụng giảm giá.
               </div>
             ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">Sản phẩm</th>
+                      <th className="px-3 py-2">Sản phẩm / Phân loại</th>
                       <th className="px-3 py-2 text-right">Giá gốc</th>
-                      <th className="px-3 py-2 text-center w-32">Giảm giá (%)</th>
+                      <th className="px-3 py-2 text-center w-32">Giảm giá (VNĐ)</th>
                       <th className="px-3 py-2 text-center w-28">Số lượng</th>
                       <th className="px-3 py-2 text-center w-24"></th>
                     </tr>
@@ -742,7 +735,7 @@ export function ProductManagementPopup({
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {existingProducts.map((item) => (
                       <ExistingProductRow
-                        key={item.productId}
+                        key={item.variantId}
                         item={item}
                         onUpdate={handleUpdateExisting}
                         onRemove={handleRemoveExisting}
@@ -778,8 +771,8 @@ function ExistingProductRow({
   onRemove,
 }: {
   item: SaleOffProduct;
-  onUpdate: (productId: number, saleOffValue: number, quantity: number) => Promise<void>;
-  onRemove: (productId: number) => Promise<void>;
+  onUpdate: (variantId: number, saleOffValue: number, quantity: number) => Promise<void>;
+  onRemove: (variantId: number) => Promise<void>;
 }) {
   const [saleOffValue, setSaleOffValue] = useState(item.saleOffValue);
   const [quantity, setQuantity] = useState(item.quantity);
@@ -790,13 +783,13 @@ function ExistingProductRow({
 
   const handleUpdate = async () => {
     setSaving(true);
-    await onUpdate(item.productId, saleOffValue, quantity);
+    await onUpdate(item.variantId, saleOffValue, quantity);
     setSaving(false);
   };
 
   const handleRemove = async () => {
     setRemoving(true);
-    await onRemove(item.productId);
+    await onRemove(item.variantId);
     setRemoving(false);
   };
 
@@ -813,12 +806,15 @@ function ExistingProductRow({
           )}
           <div className="min-w-0">
             <p className="truncate font-medium text-slate-900">{item.productName}</p>
-            {item.productCode && <p className="text-xs text-slate-500">{item.productCode}</p>}
+            <p className="text-xs text-slate-500">
+              {item.sku && <span className="mr-1">{item.sku}</span>}
+              {item.variantOptions && <span className="text-slate-400">· {item.variantOptions}</span>}
+            </p>
           </div>
         </div>
       </td>
-      <td className="px-3 py-2 text-right text-slate-600">
-        {item.originalPrice?.toLocaleString("vi-VN")}đ
+      <td className="px-3 py-2 text-right text-slate-600 whitespace-nowrap">
+        {item.variantPrice?.toLocaleString("vi-VN")}đ
       </td>
       <td className="px-3 py-2 text-center">
         <input
@@ -826,7 +822,7 @@ function ExistingProductRow({
           min={0}
           value={saleOffValue}
           onChange={(e) => setSaleOffValue(Number(e.target.value))}
-          className="w-20 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200"
+          className="w-24 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200"
         />
       </td>
       <td className="px-3 py-2 text-center">

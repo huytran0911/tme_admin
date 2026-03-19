@@ -32,16 +32,19 @@ export type SaleOffDetail = {
   updatedBy: string | null;
 };
 
-// Sale Off Product (matches SaleOffProductDto)
+// Sale Off Product (matches SaleOffProductDto — now variant-based)
 export type SaleOffProduct = {
   productId: number;
+  variantId: number;
   productCode: string;
   productName: string;
   productNameEn: string | null;
   productImage: string | null;
-  originalPrice: number | null;
-  saleOffValue: number; // percentage or fixed amount
+  sku: string | null;
+  variantPrice: number; // base price from variant price tier (min_qty=1)
+  saleOffValue: number; // fixed amount discount
   quantity: number;
+  variantOptions: string | null;
   createdAt: string;
 };
 
@@ -78,9 +81,9 @@ export type GetSaleOffProductsParams = {
   PageSize?: number;
 };
 
-// Add products request item
+// Add products request item (now uses variantId)
 export type SaleOffProductItem = {
-  productId: number;
+  variantId: number;
   saleOffValue: number;
   quantity: number;
 };
@@ -113,4 +116,29 @@ export type ProductForSelection = {
   price: number | null;
   originalPrice: number | null;
   quantity: number | null;
+};
+
+// Variant for selection (from /admin/v1/products/{productId}/variants)
+export type VariantForSelection = {
+  id: number;
+  productId: number;
+  sku: string | null;
+  stock: number;
+  status: boolean;
+  options: VariantOption[];
+  priceTiers: PriceTier[];
+  basePrice: number | null;
+};
+
+export type VariantOption = {
+  productTypeId: number;
+  productTypeName: string;
+  productTypeValueId: number;
+  productTypeValueName: string;
+};
+
+export type PriceTier = {
+  id: number;
+  minQty: number;
+  price: number;
 };
