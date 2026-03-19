@@ -3,14 +3,15 @@ frontend:
   phases:
     preBuild:
       commands:
-        - npm install
+        - npm install --legacy-peer-deps  # Thêm flag này ở đây
     build:
       commands:
         - npm run build
   artifacts:
-    baseDirectory: dist
+    baseDirectory: .next
     files:
       - '**/*'
   cache:
     paths:
       - node_modules/**/*
+      - .next/cache/**/*
