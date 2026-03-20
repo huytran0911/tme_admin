@@ -6,6 +6,7 @@ export type Customer = {
   name: string | null; // fullName in API is "name"
   phone: string | null;
   status: string | null; // "0" = active, "1" = locked
+  address: string | null;
   point: number; // "point" not "points" in API
   createdAt: string;
 };

@@ -236,6 +236,7 @@ export function StepProducts({
         quantity: qty,
         unitPrice,
         lineTotal: unitPrice * qty,
+        saleOffDiscount: 0,
         stock,
         priceTiers: tiers,
       };
